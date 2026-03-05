@@ -176,3 +176,21 @@ export const createFlashcardsBatch = async (req: any, res: any) => {
         res.status(500).json({ error: '批量导入失败' });
     }
 };
+
+// ==========================================
+// 删除分类 (Delete Category)
+// ==========================================
+export const deleteCategory = async (req: any, res: any) => {
+    try {
+        const { id } = req.params;
+        // 1. 先删除这个分类下的所有卡片
+        await Flashcard.deleteMany({ category: id });
+        // 2. 再删除分类本身
+        await Category.findByIdAndDelete(id);
+        
+        res.json({ message: '分类及所属卡片已彻底删除' });
+    } catch (error) {
+        console.error("删除分类失败:", error);
+        res.status(500).json({ error: '删除分类失败' });
+    }
+};

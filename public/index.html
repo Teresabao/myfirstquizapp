@@ -26,6 +26,7 @@
                         <option value="">请选择分类（必选）</option>
                     </select>
                     <button type="button" class="add-category-btn" onclick="openCategoryModal()">+ 新增分类</button>
+                    <button type="button" class="delete-category-btn" onclick="deleteSelectedCategory()" style="background: #e53e3e; color: white; border: none; border-radius: 8px; padding: 0 15px; cursor: pointer;">- 删除选定分类</button>
                 </div>
                 
                 <div class="form-actions-row">
@@ -34,8 +35,11 @@
                 </div>
             </div>
             
-            <div class="toolbar">
-                <input type="text" id="search-input" placeholder="🔍 搜索问题、答案或分类..." onkeyup="filterCards()">
+            <div class="toolbar" style="display: flex; gap: 10px; margin-bottom: 20px;">
+                <select id="filter-category-select" class="form-control" onchange="filterCards()" style="max-width: 200px;">
+                    <option value="all">📁 查看所有分类</option>
+                </select>
+                <input type="text" id="search-input" placeholder="🔍 搜索问题、答案..." onkeyup="filterCards()" style="flex: 1;">
             </div>
 
             <div id="flashcards-list" class="cards-grid"></div>
@@ -107,18 +111,17 @@
                     <span style="font-size: 0.9rem; color: #4a5568;"> 张</span>
                 </div>
 
-                <button onclick="startStudyMode()" class="start-btn">开始学习</button>
+                <div style="display: flex; gap: 15px; justify-content: center; margin-top: 20px;">
+                    <button onclick="startReciteMode()" class="start-btn" style="background: #48bb78;">📖 开始背诵 (翻卡)</button>
+                    <button onclick="startSpellMode()" class="start-btn" style="background: #4299e1;">✏️ 开始默写 (拼写)</button>
+                </div>
             </div>
 
             <div id="study-card-area" class="hidden">
-                
                 <div class="study-progress">
                     <span id="study-progress-text">1 / 10</span>
-                    <div class="progress-bar-container">
-                        <div id="progress-bar-fill"></div>
-                    </div>
+                    <div class="progress-bar-container"><div id="progress-bar-fill"></div></div>
                 </div>
-
                 <div id="study-card" class="study-card" onclick="flipCard()">
                     <div id="card-inner" class="card-inner">
                         <div class="card-front">
@@ -128,7 +131,6 @@
                             </div>
                             <p class="flip-hint">👆 点击空白处翻看答案</p>
                         </div>
-                        
                         <div class="card-back">
                             <div style="display: flex; align-items: center; justify-content: center; gap: 10px;">
                                 <h3 id="study-answer"></h3>
@@ -138,10 +140,30 @@
                         </div>
                     </div>
                 </div>
-                
                 <div class="study-controls">
+                    <button id="study-prev-btn" onclick="prevStudyCard()" style="background: #a0aec0; display: none;">⬅️ 上一张</button>
                     <button onclick="markAsKnown()">已掌握 (下一个)</button>
                     <button onclick="markAsReview()">需要复习 (重背)</button>
+                </div>
+            </div>
+
+            <div id="spell-card-area" class="hidden">
+                <div class="study-progress">
+                    <span id="spell-progress-text"></span>
+                </div>
+                <div class="spell-card">
+                    <div style="display: flex; align-items: center; justify-content: center; gap: 10px;">
+                        <h3 id="spell-question" style="font-size: 1.8rem;"></h3>
+                        <button class="speak-btn" onclick="speakWord(document.getElementById('spell-question').innerText, event)">🔊</button>
+                    </div>
+                    <input type="text" id="spell-input" placeholder="请在此输入对应的答案..." onkeypress="handleSpellEnter(event)" autocomplete="off">
+                    <br>
+                    <button onclick="checkSpelling()" class="check-btn">提交检验 (Enter)</button>
+                    <div id="spell-feedback" class="feedback-text"></div>
+                </div>
+                <div class="study-controls hidden" id="spell-next-control" style="margin-top: 20px;">
+                    <button id="spell-prev-btn" onclick="prevSpellCard()" style="background: #a0aec0; margin-right: 15px; display: none;">⬅️ 上一张</button>
+                    <button onclick="nextSpellCard()">下一张 ➡️</button>
                 </div>
             </div>
         </div>

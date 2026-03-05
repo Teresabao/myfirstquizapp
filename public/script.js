@@ -11,40 +11,46 @@ document.addEventListener('DOMContentLoaded', () => {
 function showView(viewName) {
     document.querySelectorAll('.view').forEach(el => el.classList.add('hidden'));
     document.getElementById(`${viewName}-view`).classList.remove('hidden');
-    
     if (viewName === 'manage') loadFlashcards();
     if (viewName === 'study') {
-        // 进入学习模式时，先显示设置面板，隐藏卡片
         document.getElementById('study-setup').classList.remove('hidden');
         document.getElementById('study-card-area').classList.add('hidden');
+        document.getElementById('spell-card-area').classList.add('hidden'); // 确保拼写区域也隐藏
     }
 }
 
 // === 分类逻辑 ===
+// ==========================================
+// 获取所有分类并填充到各个下拉框
+// ==========================================
 async function loadCategories() {
     try {
         const response = await fetch('/api/categories');
         const categories = await response.json();
-        
-        const selectManage = document.getElementById('category-select');
-        const selectEdit = document.getElementById('edit-category-select');
-        const selectStudy = document.getElementById('study-category-select'); // ✨ 学习页面的下拉框
-        
-        if (!selectManage || !selectEdit || !selectStudy) return;
 
-        selectManage.innerHTML = '<option value="">请选择分类（必选）</option>';
-        selectEdit.innerHTML = '<option value="">请选择分类（必选）</option>';
-        selectStudy.innerHTML = '<option value="all">📚 全部卡片 (混合复习)</option>';
-        
+        // 1. 找到页面上的三个下拉框
+        const selectManage = document.getElementById('category-select') || document.getElementById('manage-category-select'); 
+        const selectStudy = document.getElementById('study-category-select');
+        const selectFilter = document.getElementById('filter-category-select'); // 👈 新增的筛选下拉框
+
+        // 2. 清空它们，并设置好“默认的第一个选项”
+        if (selectManage) selectManage.innerHTML = '';
+        if (selectStudy) selectStudy.innerHTML = '<option value="all">📚 全部卡片 (混合复习)</option>';
+        if (selectFilter) selectFilter.innerHTML = '<option value="all">📁 查看所有分类</option>'; 
+
+        // 3. 遍历数据库里的分类，挨个塞进这三个下拉框里
         categories.forEach(category => {
             const optionHtml = `<option value="${category._id}">${category.name}</option>`;
-            selectManage.insertAdjacentHTML('beforeend', optionHtml);
-            selectEdit.insertAdjacentHTML('beforeend', optionHtml);
-            selectStudy.insertAdjacentHTML('beforeend', optionHtml);
+            
+            if (selectManage) selectManage.insertAdjacentHTML('beforeend', optionHtml);
+            if (selectStudy) selectStudy.insertAdjacentHTML('beforeend', optionHtml);
+            if (selectFilter) selectFilter.insertAdjacentHTML('beforeend', optionHtml); // 👈 关键：把数据喂给筛选框
         });
-    } catch (error) { console.error('获取分类失败:', error); }
-}
 
+    } catch (error) {
+        console.error('获取分类失败:', error);
+    }
+}
 function openCategoryModal() {
     document.getElementById('category-modal').style.display = 'block';
     document.getElementById('modal-overlay').style.display = 'block';
@@ -75,6 +81,25 @@ async function confirmCategory() {
     } catch (error) { console.error(error); }
 }
 
+async function deleteSelectedCategory() {
+    const select = document.getElementById('category-select');
+    const categoryId = select.value;
+    const categoryName = select.options[select.selectedIndex]?.text;
+
+    if (!categoryId) return alert('请先在下拉菜单中选择你要删除的分类！');
+    
+    // 二次确认，防止误删
+    if (!confirm(`⚠️ 危险操作！\n确定要删除分类【${categoryName}】吗？\n这将会同时删除该分类下的所有卡片，且无法恢复！`)) return;
+
+    try {
+        const response = await fetch(`/api/categories/${categoryId}`, { method: 'DELETE' });
+        if (response.ok) {
+            alert('删除成功！');
+            await loadCategories(); // 刷新分类列表
+            loadFlashcards();       // 刷新卡片列表（被删分类的卡片会消失）
+        }
+    } catch (error) { console.error(error); }
+}
 // === 闪卡逻辑 ===
 async function loadFlashcards() {
     try {
@@ -122,11 +147,18 @@ function renderCards(cardsToRender) {
 // ✨ 新增：实时搜索过滤功能
 function filterCards() {
     const searchTerm = document.getElementById('search-input').value.toLowerCase();
+    const filterCategoryId = document.getElementById('filter-category-select').value;
+
     const filteredCards = allFlashcards.filter(card => {
         const categoryName = card.category ? card.category.name.toLowerCase() : '';
-        return card.question.toLowerCase().includes(searchTerm) || 
-               card.answer.toLowerCase().includes(searchTerm) ||
-               categoryName.includes(searchTerm);
+        // 1. 查文本
+        const matchesSearch = card.question.toLowerCase().includes(searchTerm) || 
+                              card.answer.toLowerCase().includes(searchTerm) ||
+                              categoryName.includes(searchTerm);
+        // 2. 查分类
+        const matchesCategory = filterCategoryId === 'all' || (card.category && card.category._id === filterCategoryId);
+        
+        return matchesSearch && matchesCategory;
     });
     renderCards(filteredCards);
 }
@@ -183,7 +215,7 @@ async function updateFlashcard() {
 
 // === ✨ 升级版学习模式逻辑 ===
 // 替换原来的 startStudyMode 函数
-function startStudyMode() {
+function startReciteMode() {
     const selectedCategoryId = document.getElementById('study-category-select').value;
     // 获取用户设置的上限数量
     const limitInput = document.getElementById('study-limit').value;
@@ -229,6 +261,43 @@ function startStudyMode() {
     renderStudyCard();
 }
 
+function startSpellMode() {
+    // ✨ 改动：现在去读取统一的 study-category-select 和 study-limit
+    const selectedCategoryId = document.getElementById('study-category-select').value;
+    const limitInput = document.getElementById('study-limit').value;
+    const maxCards = parseInt(limitInput) || 20; 
+    
+    const now = new Date();
+    
+    // 筛选到期的卡片
+    let dueCards = allFlashcards.filter(card => {
+        const date = card.nextReviewDate ? new Date(card.nextReviewDate) : new Date(0);
+        const isMatch = selectedCategoryId === 'all' || (card.category && card.category._id === selectedCategoryId);
+        return date <= now && isMatch;
+    });
+
+    if (dueCards.length === 0) {
+        alert('🎉 太棒了！今天没有需要检验的卡片！');
+        return showView('manage');
+    }
+    
+    // 优先复习旧卡片
+    dueCards.sort((a, b) => {
+        const intervalA = a.interval || 0;
+        const intervalB = b.interval || 0;
+        if (intervalB !== intervalA) return intervalB - intervalA; 
+        return Math.random() - 0.5; 
+    });
+
+    // 截断数量
+    spellCards = dueCards.slice(0, maxCards);
+    currentSpellIndex = 0;
+    
+    document.getElementById('study-setup').classList.add('hidden');
+    document.getElementById('spell-card-area').classList.remove('hidden'); // ✨ 显示拼写区域
+    renderSpellCard();
+}
+
 function renderStudyCard() {
     if (currentStudyIndex >= studyCards.length) {
         alert('🎉 恭喜你，完成了所选卡片的复习！');
@@ -250,6 +319,8 @@ function renderStudyCard() {
     
     const percentage = (currentNum / totalNum) * 100;
     document.getElementById('progress-bar-fill').style.width = `${percentage}%`;
+    
+    document.getElementById('study-prev-btn').style.display = currentStudyIndex === 0 ? 'none' : 'inline-block';
 }
 
 function flipCard() { 
@@ -380,4 +451,230 @@ function speakWord(text, event) {
     
     // 让浏览器读出来！
     window.speechSynthesis.speak(utterance);
+}
+
+// ==========================================
+// ✏️ 拼写模式核心逻辑
+// ==========================================
+let spellCards = [];
+let currentSpellIndex = 0;
+
+function startSpellMode() {
+    const selectedCategoryId = document.getElementById('study-category-select').value;
+    const limitInput = document.getElementById('study-limit').value;
+    const maxCards = parseInt(limitInput) || 20; 
+    const now = new Date();
+    
+    let dueCards = allFlashcards.filter(card => {
+        const date = card.nextReviewDate ? new Date(card.nextReviewDate) : new Date(0);
+        const isMatch = selectedCategoryId === 'all' || (card.category && card.category._id === selectedCategoryId);
+        return date <= now && isMatch;
+    });
+
+    if (dueCards.length === 0) {
+        alert('🎉 太棒了！今天没有需要检验的卡片！');
+        return showView('manage');
+    }
+    
+    dueCards.sort((a, b) => {
+        const intervalA = a.interval || 0;
+        const intervalB = b.interval || 0;
+        if (intervalB !== intervalA) return intervalB - intervalA; 
+        return Math.random() - 0.5; 
+    });
+
+    spellCards = dueCards.slice(0, maxCards);
+    currentSpellIndex = 0;
+    
+    document.getElementById('study-setup').classList.add('hidden');
+    document.getElementById('spell-card-area').classList.remove('hidden');
+    renderSpellCard();
+}
+
+function renderSpellCard() {
+    if (currentSpellIndex >= spellCards.length) {
+        alert('🏆 恭喜你，完成了所有的拼写检验！');
+        return showView('manage');
+    }
+    
+    const card = spellCards[currentSpellIndex];
+    document.getElementById('spell-question').innerText = card.question || '（空问题）';
+    
+    const inputEl = document.getElementById('spell-input');
+    inputEl.value = '';
+    inputEl.disabled = false;
+    inputEl.focus(); 
+    
+    document.getElementById('spell-feedback').innerHTML = '';
+    document.getElementById('spell-next-control').classList.add('hidden');
+    document.getElementById('spell-progress-text').innerText = `当前第 ${currentSpellIndex + 1} 张 / 共 ${spellCards.length} 张`;
+    document.getElementById('spell-prev-btn').style.display = currentSpellIndex === 0 ? 'none' : 'inline-block';
+}
+
+// ==========================================
+// 🧠 升级版：回车键智能判断 (批改 or 下一张)
+// ==========================================
+function handleSpellEnter(event) {
+    if (event.key === 'Enter') {
+        const inputEl = document.getElementById('spell-input');
+        // 如果输入框已经被禁用了（说明刚刚已经批改过了）
+        if (inputEl.disabled) {
+            nextSpellCard(); // 再次按回车，直接进入下一张！
+        } else {
+            checkSpelling(); // 还没批改，按回车提交批改
+        }
+    }
+}
+
+async function checkSpelling() {
+    const inputEl = document.getElementById('spell-input');
+    
+    // 如果已经批改过了（输入框被锁定），再次触发则直接进入下一张
+    if (inputEl.disabled) return nextSpellCard(); 
+
+    const inputStr = inputEl.value.trim().toLowerCase(); 
+
+    // ✨ 核心修复：防止手滑空提交
+    if (inputStr === '') {
+        // 让输入框变红，并临时修改提示语警告一下
+        inputEl.style.borderColor = '#e53e3e'; 
+        inputEl.placeholder = '⚠️ 请先输入单词哦！';
+        
+        // 1.5秒后恢复原样
+        setTimeout(() => {
+            inputEl.style.borderColor = 'transparent'; // 恢复我们之前写的现代极简无边框
+            inputEl.placeholder = '请在此输入对应的答案...';
+        }, 1500);
+        
+        return; // 🛑 拦截执行，直接退出！不再往下走批改流程
+    }
+
+    // --- 下面的代码保持原样 ---
+    const card = spellCards[currentSpellIndex];
+    if (!card || !card.answer) return console.error("❌ 这张卡片没有答案，无法校验！");
+
+    const answerStr = card.answer.trim().toLowerCase();  
+    const feedbackEl = document.getElementById('spell-feedback');
+    inputEl.disabled = true; 
+
+    const isCorrect = (inputStr === answerStr);
+
+    if (isCorrect) {
+        feedbackEl.innerHTML = '✅ <strong>拼写正确！</strong> 完全掌握！';
+        feedbackEl.style.color = '#48bb78';
+        if (typeof speakWord === 'function') speakWord(card.answer, null); 
+    } else {
+        feedbackEl.innerHTML = `❌ <strong>拼写错误。</strong><br><br>你的输入：<span style="color:red; text-decoration: line-through;">${inputStr}</span><br>正确答案：<span style="color:green;">${card.answer}</span>`;
+        feedbackEl.style.color = '#e53e3e';
+        spellCards.push(card); 
+    }
+
+    try {
+        await fetch(`/api/flashcards/${card._id}/review`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ isKnown: isCorrect })
+        });
+    } catch(e) { console.error("网络请求失败", e); }
+
+    const nextCtrl = document.getElementById('spell-next-control');
+    if(nextCtrl) nextCtrl.classList.remove('hidden');
+}
+
+// ==========================================
+// ⌨️ 全局键盘快捷键控制中心 (Keyboard Shortcuts)
+// ==========================================
+
+// 补充一个纯净版的“下一张”背诵功能（不计入成绩，只用来左右翻看）
+function nextStudyCard() {
+    if (typeof studyCards !== 'undefined' && currentStudyIndex < studyCards.length - 1) {
+        currentStudyIndex++;
+        renderStudyCard();
+    }
+}
+
+// 监听全键盘按键
+document.addEventListener('keydown', function(event) {
+    // 🛡️ 安全机制：如果用户正在“搜索框”里打字，千万不要触发快捷键！
+    const activeTag = document.activeElement.tagName.toLowerCase();
+    const isTyping = (activeTag === 'input' || activeTag === 'textarea');
+    const isSpellInput = (document.activeElement.id === 'spell-input');
+    
+    // 如果在普通输入框里打字，直接忽略（默写框除外）
+    if (isTyping && !isSpellInput) return;
+
+    const studyArea = document.getElementById('study-card-area');
+    const spellArea = document.getElementById('spell-card-area');
+
+    // ----------------------------------------
+    // 📖 A. 当处于【背诵模式】时生效的快捷键
+    // ----------------------------------------
+    if (studyArea && !studyArea.classList.contains('hidden')) {
+        switch(event.code) {
+            case 'Space': // 空格键：翻转卡片
+                event.preventDefault(); // 防止按空格时网页往下滚
+                if (typeof flipCard === 'function') flipCard();
+                break;
+            case 'ArrowLeft': // 左箭头：上一张
+                if (typeof prevStudyCard === 'function') prevStudyCard();
+                break;
+            case 'ArrowRight': // 右箭头：下一张 (纯浏览)
+                nextStudyCard();
+                break;
+            case 'Digit1': // 数字键 1：需要复习
+                if (typeof markAsReview === 'function') markAsReview();
+                break;
+            case 'Digit2': // 数字键 2：已掌握
+                if (typeof markAsKnown === 'function') markAsKnown();
+                break;
+        }
+    }
+
+    // ----------------------------------------
+    // ✏️ B. 当处于【默写模式】时生效的快捷键
+    // ----------------------------------------
+    if (spellArea && !spellArea.classList.contains('hidden')) {
+        switch(event.code) {
+            case 'ArrowLeft': // 左箭头：上一张
+                if (typeof prevSpellCard === 'function') prevSpellCard();
+                break;
+            case 'ArrowRight': // 右箭头：直接跳过看下一张
+                if (typeof nextSpellCard === 'function') nextSpellCard();
+                break;
+            case 'Enter': 
+            case 'NumpadEnter':
+                const inputEl = document.getElementById('spell-input');
+                // ✨ 核心修复：无论焦点在哪，只要输入框被锁定了（说明刚批改完）
+                // 再次按下回车，就无条件强制跳转到下一张！
+                if (inputEl && inputEl.disabled) {
+                    event.preventDefault(); // 阻止浏览器默认的回车滚动行为
+                    if (typeof nextSpellCard === 'function') nextSpellCard();
+                }
+                break;
+        }
+    }
+});
+
+
+
+// 👇 直接在文件最后一行追加粘贴：
+// ====== 回退功能逻辑 ======
+function prevStudyCard() {
+    if (currentStudyIndex > 0) {
+        currentStudyIndex--;
+        renderStudyCard();
+    }
+}
+
+function prevSpellCard() {
+    if (currentSpellIndex > 0) {
+        currentSpellIndex--;
+        renderSpellCard();
+    }
+}
+
+// ====== 补回丢失的下一张逻辑 ======
+function nextSpellCard() {
+    currentSpellIndex++;
+    renderSpellCard();
 }

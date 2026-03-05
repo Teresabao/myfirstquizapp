@@ -7,7 +7,8 @@ import {
   updateFlashcard,
   deleteFlashcard,
   recordReview, // 👈 1. 引入新方法
-  createFlashcardsBatch
+  createFlashcardsBatch,
+  deleteCategory
 } from '../controllers'; 
 
 const router = Router();
@@ -24,5 +25,6 @@ router.delete('/flashcards/:id', deleteFlashcard);
 router.patch('/flashcards/:id/review', recordReview);
 // 👇 2. 在闪卡路由区域，加上这个批量导入的专属通道
 router.post('/flashcards/batch', createFlashcardsBatch);
+router.delete('/categories/:id', deleteCategory);
 
 export default router;
